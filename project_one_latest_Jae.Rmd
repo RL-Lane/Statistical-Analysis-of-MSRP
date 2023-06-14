@@ -1,0 +1,525 @@
+---
+title: "Stats_Project_Cars_MSRP"
+author: "Timothy Cabaza, Jae Chung, & Robert Lane"
+date: "2023-06-04"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r, include=FALSE}
+library(ggplot2)
+library(dplyr)
+
+#cars <- read.csv(file.choose(), header = TRUE)
+cars <- read.csv("data1_underscore.csv", header=T)
+
+# Distribution of MSRP for QOI 1
+ggplot(data = cars, aes(x = MSRP)) + geom_histogram(binwidth = 5000, fill = "lightblue") + labs(x = "MSRP", y = "Count", title = "Distribution of MSRP")
+
+median(cars$MSRP)
+
+cars <- cars %>%
+  mutate(across(c(Make, Model, Year,	Engine_Fuel_Type,	Engine_Cylinders,	Transmission_Type, Driven_Wheels,	Number_of_Doors,	Market_Category,	Vehicle_Size,	Vehicle_Style,	Popularity), factor))
+
+boxplot(MSRP ~ Make, data = cars)
+boxplot(MSRP ~ Model, data = cars)
+ggplot(cars, aes(x = Year, y = MSRP)) +
+  geom_point() +
+  labs(x = "Year", y = "MSRP")
+boxplot(MSRP ~ Engine_Fuel_Type, data = cars)
+ggplot(cars, aes(x = Engine_HP, y = MSRP)) +
+  geom_point() +
+  labs(x = "Horsepower", y = "MSRP")
+boxplot(MSRP ~ Engine_Cylinders, data = cars)
+boxplot(MSRP ~ Transmission_Type, data = cars)
+boxplot(MSRP ~ Driven_Wheels, data = cars)
+boxplot(MSRP ~ Number_of_Doors, data = cars)
+boxplot(MSRP ~ Market_Category, data = cars)
+boxplot(MSRP ~ Vehicle_Size, data = cars)
+boxplot(MSRP ~ Vehicle_Style, data = cars)
+ggplot(cars, aes(x = highway_MPG, y = MSRP)) +
+  geom_point() +
+  labs(x = "Highway MPG", y = "MSRP")
+ggplot(cars, aes(x = city_mpg, y = MSRP)) +
+  geom_point() +
+  labs(x = "City MPG", y = "MSRP")
+boxplot(MSRP ~ Popularity, data = cars)
+
+
+```
+
+```{r}
+# Checking for missing values
+missing_values <- is.na(cars)
+col_missing_count <- colSums(missing_values)
+summary(missing_values)
+
+cars <- read.csv("data1_1.csv")
+
+cars$Outlier <- as.factor(cars$Outlier)
+# Create scatterplot
+ggplot(cars, aes(x = Make, y = MSRP, color = Outlier)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(x = "", y = "MSRP") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_color_manual(values = c("lightblue", "lightcoral"))
+
+
+```
+
+
+```{r, echo=FALSE}
+library(Sleuth3)
+library(GGally)
+library(caret)
+library(boot)
+library(lmboot)
+library(RANN)
+library(rgl)
+library(FNN)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(car)
+library(tree)
+#setwd("~/Desktop")
+#cars_clean<-read.csv(file.choose(),header=T)
+cars_clean <- read.csv("filtered_cars.csv")
+# cars_clean<-read.csv("mc.data1.csv",header=T)
+print(cars_clean)
+
+#data reduced to all cars after the year 2000. Any cars with NA values, rows automatically dropped. 
+
+#we are considering either dropping exotics or reducing categories for certain explanatory variables. 
+
+```
+
+
+```{r, echo=FALSE}
+
+# Get column names
+column_names <- names(cars_clean)
+print(column_names)
+
+```
+
+```{r, echo=FALSE}
+# Get data types
+data_types <- sapply(cars_clean, class)
+print(data_types)
+
+```
+```{r, echo=FALSE}
+#get the number of rows of data 
+filtered_cars_rows <- nrow(cars_clean)
+print(filtered_cars_rows)
+```
+
+
+#Here, we factored many of the variables as well as created a new column that averaged city and highway mpg together to form avgmpg.
+```{r, echo=FALSE, eval=F}
+#factor the appropriate categories
+
+filtered_cars <- cars_clean %>%
+  mutate(across(c(make, year, fuel, cylinders, transmission, drive, doors, type, style, mc_performance, mc_high_performance, mc_crossover, mc_exotic, mc_luxury, mc_flex_fuel, mc_hybrid, mc_tuned ), factor))
+
+#decision was made to combine hwympg and citympg to get the average mpg
+filtered_cars$avgmpg <- (filtered_cars$hwympg + filtered_cars$citympg) / 2
+filtered_cars <- subset(filtered_cars, select = -c(hwympg, citympg))
+#summary statistics of entire datasets avgmpg
+summary(filtered_cars$avgmpg)
+#top ten rows avgmpg
+head(filtered_cars)
+
+```
+
+
+# Binning process to simplify continuous variables into categories (*** May not bin to keep variables continuous)
+```{r, echo=FALSE, eval=FALSE}
+#Binning AVGMPG
+# Define the bin borders
+bin_borders <- c(0, 10, 20, 30, 40, 50, 100)
+
+# Create the binned variable
+no_exotic_factored$mpg_bin <- cut(no_exotic_factored$avgmpg, breaks = bin_borders)
+
+# Create dummy variables for the binned variable
+dummy_df <- model.matrix(~ mpg_bin - 1, data = no_exotic_factored)
+
+# Print the dummy dataframe
+#print(dummy_df)
+
+labels <- c("0-9.99", "10-19.99", "20-29.99", "30-39.99", "40-49.99", "50+")
+no_exotic_factored$avgmpg_category <- cut(no_exotic_factored$avgmpg, breaks = seq(0, 60, by = 10), labels = labels, right = FALSE)
+#"(" is inclusive, "[" is exclusive on dummy variable name.  Auto bin
+
+no_exotic_factored <- subset(no_exotic_factored, select = -mpg_bin)
+
+
+#Binning the hp
+# Define the bin borders
+bin_borders <- c(0, 100, 200, 300, 400, 500, 600, 1000)
+#min(no_exotic_factored$hp)
+#max(no_exotic_factored$hp)
+
+# Create the binned variable
+no_exotic_factored$hp_bin <- cut(no_exotic_factored$hp, breaks = bin_borders)
+
+# Create dummy variables for the binned variable
+dummy_df <- model.matrix(~ hp_bin - 1, data = no_exotic_factored)
+
+# Print the dummy dataframe
+#print(dummy_df)
+
+labels <- c("0-99.99", "100-199.99", "200-299.99", "300-399.99", "400-499.99", "500-599.99", "600-699.99", "700+")
+no_exotic_factored$hp_category <- cut(no_exotic_factored$hp, breaks = seq(0, 800, by = 100), labels = labels, right = FALSE)
+#"(" is inclusive, "[" is exclusive on dummy variable name.  Auto bin
+
+no_exotic_factored <- subset(no_exotic_factored, select = -hp_bin)
+
+```
+
+
+# Here, the code is to simply plot the relationships between msrp and the predictors within the dataset.
+```{r, fig.width=10, fig.height=12, eval=FALSE}
+
+#???? where we getting clean_cars3_factored
+print(cleaned_cars3_factored)
+
+par(mfrow=c(1,1))
+
+plot(msrp~origin_country,data=cleaned_cars3_factored,cex.names = 0.5)
+
+plot(msrp~year,data=cleaned_cars3_factored)
+
+plot(msrp~fuel,data=cleaned_cars3_factored)
+
+plot(msrp~hp,data=cleaned_cars3_factored)
+
+plot(msrp~cylinders,data=cleaned_cars3_factored)
+
+#direct drive we only have two american vehicles that have direct drive, not sure what that is, we should consider excluding? 
+plot(msrp~transmission,data=cleaned_cars3_factored)
+plot(msrp~drive,data=cleaned_cars3_factored)
+plot(msrp~doors,data=cleaned_cars3_factored)
+plot(msrp~style,data=cleaned_cars3_factored)
+plot(msrp~mc_performance,data=cleaned_cars3_factored)
+plot(msrp~mc_high_performance,data=cleaned_cars3_factored)
+plot(msrp~mc_crossover,data=cleaned_cars3_factored)
+
+# plot(msrp~mc_exotic,data=cleaned_cars3_factored)
+plot(msrp~mc_luxury,data=cleaned_cars3_factored)
+plot(msrp~mc_flex_fuel,data=cleaned_cars3_factored)
+plot(msrp~mc_hybrid,data=cleaned_cars3_factored)
+plot(msrp~mc_tuned,data=cleaned_cars3_factored)
+plot(msrp~avgmpg,data=cleaned_cars3_factored)
+
+plot1 <- cleaned_cars3_factored %>% ggplot(aes(x = origin_country, y = msrp, fill = origin_country)) + geom_bar(stat = "identity") + xlab("Country of Origin") + ylab("MSRP") + ggtitle("MSRP by Predictors") + theme(axis.text.x = element_text(angle = 45, hjust = 0.5, size = 8), axis.text.y=element_text(size=8), text=element_text(size=12), legend.position = "none")
+plot1
+
+
+
+```
+
+
+#Here, we loaded the new dataset after eliminating the mc_exotic variable. This would be the most refined data set moving forward. 
+```{r}
+#no exotics data
+#no_exotic <- read.csv(file.choose(),header = TRUE)
+no_exotic <- read.csv("no_exotics.csv")
+
+no_exotic
+
+no_exotic_factored <- no_exotic %>%
+  mutate(across(c(origin_country, year, fuel, cylinders, transmission, drive, doors, style, mc_performance, mc_high_performance, mc_crossover, mc_luxury, mc_flex_fuel, mc_hybrid, mc_tuned), factor))
+
+no_exotic_factored$avgmpg <- as.integer(no_exotic_factored$avgmpg)
+
+#note avgmpg is not grouped in no_exotic factored 
+
+```
+
+# Here, we looked to see if the relationships between year, doors, and cylinders compared to some of the other predictors showed variance in their trends. Some of the variables were selected randomly, and some were selected based on domain knowledge to test. Ultimately, the decision to form interaction terms were determined upon interpreting the visual data.
+```{r, fig.width=10, fig.height=10}
+
+#no
+ggplot(data=no_exotic_factored,aes(x=year,y=log(msrp),colour=mc_performance)) + geom_boxplot()
+
+#no
+ggplot(data=no_exotic_factored,aes(x=doors,y=log(msrp),colour=mc_performance)) + geom_boxplot()
+
+#
+ggplot(data=no_exotic_factored,aes(x=cylinders,y=log(msrp),colour=mc_performance)) + geom_boxplot()
+
+#no
+ggplot(data=no_exotic_factored,aes(x=year,y=log(msrp),colour=mc_luxury)) + geom_boxplot()
+
+#no
+ggplot(data=no_exotic_factored,aes(x=doors,y=log(msrp),colour=mc_luxury)) + geom_boxplot()
+
+#no
+ggplot(data=no_exotic_factored,aes(x=cylinders,y=log(msrp),colour=mc_luxury)) + geom_boxplot()
+
+# No interaction term, possible but decided not to include 
+ggplot(data=no_exotic_factored,aes(x=cylinders,y=log(msrp),colour=style)) + geom_boxplot()
+
+#no
+ggplot(data=no_exotic_factored,aes(x=cylinders,y=log(msrp),colour=origin_country)) + geom_boxplot()
+
+#no, changing x=hp_category to x=hp 
+ggplot(data=no_exotic_factored,aes(x=hp,y=log(msrp),colour=origin_country)) + geom_boxplot()
+```
+
+# Here we split the dataset into train and validation sets.
+```{r}
+
+data_one <- no_exotic_factored
+set.seed(1234) 
+
+#partition the dataframe 50% for training, 50% for validation
+split <- createDataPartition(data_one$msrp, p = 0.5, list = FALSE)  
+
+# Contains 50% of the data as a data frame
+train_data <- data_one[split, ]
+print(train_data)
+
+# Contains 50% of the data as a data frame
+val_data <- data_one[-split, ]
+print(val_data)
+```
+
+#Model 1: Simple Linear Regression with no added complexity (no interactions, no transformations, no polynomials)
+
+```{r}
+#explore simple linear regression model and evaulate
+fit <- lm(msrp ~ ., data = train_data)
+summary(fit)
+
+# residuals suffere from constant variance issue 
+plot(fit$fitted.values,fit$residuals,ylab="Residuals",xlab="Fitted")
+abline(h = 0, col = "red")
+
+# QQ plot indicates violations of normality, not a straight line 
+qqnorm(fit$residuals, main = "Normal Q-Q Plot")
+
+# normal distribution, bimodal distribution 
+hist(fit$residuals, xlab = "Residuals", main = "Histograms of Residuals")
+
+#plot studentized residuals
+plot(fit$fitted.values, rstudent(fit), ylab = "Studentized Residuals", xlab = "Fitted Values", main = "Studentized Residuals vs Leverage")
+
+
+
+
+```
+
+
+```{r, fig.width=10, fig.height=10}
+
+data_one <- no_exotic_factored
+set.seed(1234) 
+
+#partition the dataframe 50% for training, 50% for validation
+split <- createDataPartition(data_one$msrp, p = 0.7, list = FALSE)  
+
+# Contains 50% of the data as a data frame
+train_data <- data_one[split, ]
+print(train_data)
+
+# Contains 50% of the data as a data frame
+val_data <- data_one[-split, ]
+print(val_data)
+
+#lasso using glmnet function in R 
+fitControl<-trainControl(method="repeatedcv",number=10,repeats=1) 
+glmnet.fit<-train(log(msrp)~.,
+               data=train_data,
+               method="glmnet",
+               trControl=fitControl
+               )
+#obtain the optimal lambda 
+opt.pen<-glmnet.fit$finalModel$lambdaOpt 
+#obtain the coefficients at the optimal lambda
+lasso_coef<-coef(glmnet.fit$finalModel, s=opt.pen)
+print(lasso_coef)
+# # Identify the variables selected by LASSO (non-zero coefficients)
+glmnet.fit
+
+plot(glmnet.fit)
+
+
+
+# Calculate the MSE
+mse <- mean((predict(glmnet.fit, newdata = val_data) - val_data$msrp)^2)
+print(mse)
+
+# Calculate the RMSE
+rmse <- sqrt(mean((predict(glmnet.fit, newdata = val_data) - val_data$msrp)^2))
+
+# Print the RMSE
+print(rmse)
+
+
+#obtain the coefficients at the optimal lambda
+lasso_coef<-coef(glmnet.fit$finalModel, s=opt.pen)
+print(lasso_coef)
+
+# Get the summary of glmnet.fit
+glmnet.fit
+
+plot(glmnet.fit)
+
+
+
+```
+
+# Attempt to add complexity to the model and re-running glmnet. To explore added complexity a polynomial to the 4th degree was added to “hp” and ”avgmpg” to the automated feature selection. 
+The idea behind adding complexity is that we are attempting to increase the accuracy of our model. Given that we are only trying to predict adding complexity is an appropriate technique to utilize. 
+Here we are performing a 10 fold cross-validation for various mixing and penalty terms on the training dataset which contains 50% of the original data. 
+
+
+```{r, fig.width=10, fig.height=10}
+#attempt 3 adding polynomial
+# Create polynomial terms for "hp" and "avgmpg" up to degree 10 again without column style and without the interaction cylinders:style 
+
+# train_data
+
+data_one <- no_exotic_factored
+set.seed(1234) 
+
+#partition the dataframe 50% for training, 50% for validation
+split <- createDataPartition(data_one$msrp, p = 0.7, list = FALSE)  
+
+# Contains 50% of the data as a data frame
+train_data <- data_one[split, ]
+print(train_data)
+
+# Contains 50% of the data as a data frame
+val_data <- data_one[-split, ]
+print(val_data)
+# adding polynomial -- note you can only run this one so 
+train_data$hp <- poly(train_data$hp, 2)
+train_data$avgmpg <- poly(train_data$avgmpg,2)
+# # y <- no_exotic_factored$msrp
+# print(train_data$avgmpg)
+
+set.seed(1234)
+fitControl<-trainControl(method="repeatedcv",number=10,repeats=1) 
+glmnet.fit<-train(log(msrp)~ .,
+               data=train_data,
+               method="glmnet",
+               trControl=fitControl
+               )
+#obtain the optimal lambda 
+opt.pen<-glmnet.fit$finalModel$lambdaOpt 
+
+
+
+#obtain the coefficients at the optimal lambda
+lasso_coef<-coef(glmnet.fit$finalModel, s=opt.pen)
+print(lasso_coef)
+# # Identify the variables selected by LASSO (non-zero coefficients)
+glmnet.fit
+
+plot(glmnet.fit)
+
+
+#different way to calculate mse 
+# Prediction function for glmnet
+predict_glmnet <- function(object, newdata) {
+  predict(object, newx = as.matrix(newdata), s = opt.pen)
+}
+
+# Predict on the validation data
+
+predicted_val <- predict_glmnet(glmnet.fit, newdata = val_data)
+print(predicted_val)
+
+coefficients <- coef(glmnet.fit, s = "lambda.min")
+
+predicted_val <- predict(glmnet.fit, newx = val_data)
+
+# Calculate the residuals (actual - predicted)
+my_model_reduced_residuals <- val_data$msrp - predicted_val
+# Calculate MSE
+my_model_reduced_mse <- mean(my_model_reduced_residuals^2)
+# Calculate RMSE
+my_model_reduced_rmse <- sqrt(my_model_reduced_mse)
+# Print results
+cat("LM model MSE:", my_model_reduced_mse, "\n")
+cat("LM model RMSE:", my_model_reduced_rmse, "\n")
+
+
+
+
+```
+#this section not required we can delete it. 
+
+#Regression Tree and KNN
+#Nonparametric example
+#Regression Tree 1
+```{r, fig.width=10, fig.height=10}
+
+#reload our data since we altered the training dataset in the previous model by adding complexity 
+set.seed(1234) 
+
+#partition the dataframe 50% for training, 50% for validation
+split <- createDataPartition(data_one$msrp, p = 0.7, list = FALSE)  
+
+# Contains 50% of the data as a data frame
+train_data <- data_one[split, ]
+print(train_data)
+
+# Contains 50% of the data as a data frame
+val_data <- data_one[-split, ]
+print(val_data)
+
+
+#Run our regression tree 
+short.tree<-tree(train_data$msrp ~ ., train_data, mincut=50)
+summary(short.tree)
+
+# Plot the regression tree
+plot(short.tree)
+text(short.tree, pretty = 0)
+
+
+
+# Predict the response variable using the tree model
+tree_predictions <- predict(short.tree, newdata = val_data)
+
+# Calculate the residuals (actual - predicted)
+tree_residuals <- val_data$msrp - tree_predictions
+
+# Calculate MSE
+tree_mse <- mean(tree_residuals^2)
+
+# Calculate RMSE
+tree_rmse <- sqrt(tree_mse)
+
+# Print results
+cat("Tree model MSE:", tree_mse, "\n")
+cat("Tree model RMSE:", tree_rmse, "\n")
+
+```
+
+
+
+
+
+
+
+
